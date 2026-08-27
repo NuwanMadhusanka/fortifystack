@@ -1,0 +1,89 @@
+name: infra
+
+# Validates + security-scans Terraform on every PR, and plans against AWS.
+# Auth to AWS uses GitHub OIDC (no long-lived access keys stored as secrets).
+# Set repo variable AWS_DEPLOY_ROLE_ARN to a role trusting this repo's OIDC.
+
+on:
+  push:
+    branches: [main]
+    paths: ["terraform/**", "app/**", ".github/workflows/infra.yml"]
+  pull_request:
+    paths: ["terraform/**", "app/**"]
+
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+  pull-requests: write
+
+env:
+  TF_DIR: terraform/envs/dev
+  AWS_REGION: us-east-1
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init (no backend)
+        run: terraform -chdir=$TF_DIR init -backend=false
+
+      - name: Terraform validate
+        run: terraform -chdir=$TF_DIR validate
+
+      - name: tfsec (IaC security scan)
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          soft_fail: true   # report findings without failing the build (tune later)
+
+  plan:
+    needs: validate
+    runs-on: ubuntu-latest
+    # Only plan when we have AWS credentials configured (skip on forks).
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Terraform init
+        run: terraform -chdir=$TF_DIR init
+
+      - name: Terraform plan
+        run: terraform -chdir=$TF_DIR plan -no-color
+
+  # Manual/gated apply. Protect the "production" environment in repo settings
+  # so a human must approve before infrastructure changes are applied.
+  apply:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+      - run: terraform -chdir=$TF_DIR init
+      - run: terraform -chdir=$TF_DIR apply -auto-approve

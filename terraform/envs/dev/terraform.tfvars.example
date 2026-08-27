@@ -1,0 +1,25 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored.
+
+project = "fortifystack"
+region  = "us-east-1"
+owner   = "yourname"
+
+# Get CloudWatch alarm emails (you'll confirm via a link AWS emails you).
+# alarm_email = "you@example.com"
+
+# --- App tier (portfolio defaults are cheap) ---
+instance_type    = "t3.micro"
+min_size         = 2
+max_size         = 4
+desired_capacity = 2
+
+# --- HA knobs ---
+# Set true to demonstrate automatic database failover (roughly doubles DB cost).
+multi_az = false
+# Set true for one NAT gateway per AZ (prod). false = single shared NAT (cheap).
+one_nat_per_az = false
+
+# --- Advanced edge (needs a domain hosted in Route53; deploy in us-east-1) ---
+# enable_edge      = true
+# domain_name      = "app.example.com"
+# hosted_zone_name = "example.com"

@@ -1,0 +1,33 @@
+#!/bin/bash
+set -euxo pipefail
+
+# --- install runtime ---
+dnf install -y python3-pip
+pip3 install --quiet boto3 pg8000
+
+# --- drop the app (base64-encoded so Terraform templating never mangles it) ---
+mkdir -p /opt/app
+echo "${app_py_b64}" | base64 -d > /opt/app/app.py
+
+# --- run it as a systemd service (auto-restart, starts on boot) ---
+cat > /etc/systemd/system/fortifystack.service <<'UNIT'
+[Unit]
+Description=FortifyStack demo app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=PORT=${app_port}
+Environment=SECRET_ARN=${secret_arn}
+Environment=AWS_REGION=${region}
+ExecStart=/usr/bin/python3 /opt/app/app.py
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now fortifystack.service
